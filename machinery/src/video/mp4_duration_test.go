@@ -19,7 +19,10 @@ func TestMP4Duration(t *testing.T) {
 	sps := []byte{0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x47, 0xfe, 0xc8}
 	pps := []byte{0x68, 0xce, 0x38, 0x80}
 
-	mp4Video := NewMP4(tmpFile, [][]byte{sps}, [][]byte{pps}, nil, 10)
+	mp4Video, err := NewMP4(tmpFile, [][]byte{sps}, [][]byte{pps}, nil, 10)
+	if err != nil {
+		t.Fatalf("NewMP4 failed: %v", err)
+	}
 	mp4Video.SetWidth(640)
 	mp4Video.SetHeight(480)
 	videoTrack := mp4Video.AddVideoTrack("H264")
@@ -49,9 +52,8 @@ func TestMP4Duration(t *testing.T) {
 	for i := 0; i < numFrames; i++ {
 		pts := uint64(i) * frameDuration
 		isKeyframe := i%gopSize == 0
-		err := mp4Video.AddSampleToTrack(videoTrack, isKeyframe, makeFrame(isKeyframe), pts, 0)
-		if err != nil {
-			t.Fatalf("AddSampleToTrack failed at frame %d: %v", i, err)
+		if addErr := mp4Video.AddSampleToTrack(videoTrack, isKeyframe, makeFrame(isKeyframe), pts, 0); addErr != nil {
+			t.Fatalf("AddSampleToTrack failed at frame %d: %v", i, addErr)
 		}
 	}
 	expectedDuration = uint64(numFrames) * frameDuration // Should be 6000ms (150 * 40)
@@ -76,20 +78,20 @@ func TestMP4Duration(t *testing.T) {
 	t.Logf("Sum of segment durations: %d ms", sumSegDur)
 
 	// Now read back the file and inspect the boxes
-	f, err := os.Open(tmpFile)
-	if err != nil {
-		t.Fatalf("Failed to open output file: %v", err)
+	f, openErr := os.Open(tmpFile)
+	if openErr != nil {
+		t.Fatalf("Failed to open output file: %v", openErr)
 	}
 	defer f.Close()
 
-	fi, err := f.Stat()
-	if err != nil {
-		t.Fatalf("Failed to stat output file: %v", err)
+	fi, statErr := f.Stat()
+	if statErr != nil {
+		t.Fatalf("Failed to stat output file: %v", statErr)
 	}
 
-	parsedFile, err := mp4ff.DecodeFile(f)
-	if err != nil {
-		t.Fatalf("Failed to decode MP4: %v", err)
+	parsedFile, decodeErr := mp4ff.DecodeFile(f)
+	if decodeErr != nil {
+		t.Fatalf("Failed to decode MP4: %v", decodeErr)
 	}
 
 	t.Logf("File size: %d bytes", fi.Size())
@@ -146,12 +148,6 @@ func TestMP4Duration(t *testing.T) {
 		}
 		t.Logf("sidx total duration: %d ms", sidxDuration)
 	}
-
-	// VERIFY: All duration values should be consistent
-	// The expected duration for 150 frames at 40ms each:
-	// - The sample-buffering pattern means the LAST sample uses LastVideoSampleDTS as duration
-	// - So all 150 samples should produce 150 * 40ms = 6000ms total
-	// But due to the pending sample pattern, the actual trun durations might differ
 
 	fmt.Println()
 	fmt.Println("=== DURATION CONSISTENCY CHECK ===")
