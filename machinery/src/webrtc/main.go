@@ -710,13 +710,17 @@ func InitializeWebRTCConnection(configuration *models.Configuration, communicati
 }
 
 func NewVideoBroadcaster(streams []packets.Stream) *TrackBroadcaster {
-	// Verify H264 is available (same check as NewVideoTrack)
 	for _, s := range streams {
 		if s.Name == "H264" {
 			return NewTrackBroadcaster(pionWebRTC.MimeTypeH264, "video", trackStreamID)
 		}
 	}
-	log.Log.Error("webrtc.main.NewVideoBroadcaster(): no H264 stream found")
+	for _, s := range streams {
+		if s.Name == "H265" {
+			return NewTrackBroadcaster(pionWebRTC.MimeTypeH265, "video", trackStreamID)
+		}
+	}
+	log.Log.Error("webrtc.main.NewVideoBroadcaster(): no H264 or H265 stream found")
 	return nil
 }
 
@@ -816,6 +820,7 @@ type streamState struct {
 // codecSupport tracks which codecs are available in the stream
 type codecSupport struct {
 	hasH264      bool
+	hasH265      bool
 	hasPCM_MULAW bool
 	hasAAC       bool
 	hasOpus      bool
@@ -830,6 +835,8 @@ func detectCodecs(rtspClient capture.RTSPClient) codecSupport {
 		switch stream.Name {
 		case "H264":
 			support.hasH264 = true
+		case "H265":
+			support.hasH265 = true
 		case "PCM_MULAW":
 			support.hasPCM_MULAW = true
 		case "AAC":
@@ -844,7 +851,7 @@ func detectCodecs(rtspClient capture.RTSPClient) codecSupport {
 
 // hasValidCodecs checks if at least one valid video or audio codec is present
 func (cs codecSupport) hasValidCodecs() bool {
-	hasVideo := cs.hasH264
+	hasVideo := cs.hasH264 || cs.hasH265
 	hasAudio := cs.hasPCM_MULAW || cs.hasAAC || cs.hasOpus
 	return hasVideo || hasAudio
 }
