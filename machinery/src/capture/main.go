@@ -334,6 +334,7 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 				}
 				if recordingStatus == "started" {
 
+					mp4Video.Close(&config)
 					log.Log.Info("capture.main.HandleRecordStream(continuous): Recording finished: file save: " + name)
 
 					// Cleanup muxer
