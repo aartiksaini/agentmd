@@ -2,16 +2,16 @@ name: Go
 
 on:
   push:
-    branches: [develop, master]
+    branches: [dev, develop, main, master]
   pull_request:
-    branches: [develop, master]
+    branches: [dev, develop, main, master]
 
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
     container:
-      image: kerberos/base:eb6b088
+      image: kerberos/base:amd64-ddbe40e
 
     strategy:
       matrix:

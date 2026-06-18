@@ -74,6 +74,7 @@ type Capture struct {
 	Fragmented            string      `json:"fragmented,omitempty" bson:"fragmented,omitempty"`
 	FragmentedDuration    int64       `json:"fragmentedduration,omitempty" bson:"fragmentedduration,omitempty"`
 	PixelChangeThreshold  int         `json:"pixelChangeThreshold,omitempty"`
+	Audio                 string      `json:"audio,omitempty" bson:"audio,omitempty"`
 }
 
 // IPCamera configuration, such as the RTSP url of the IPCamera and the FPS.

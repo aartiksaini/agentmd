@@ -438,11 +438,15 @@ func (g *Golibrtsp) Connect(ctx context.Context, ctxOtel context.Context) (err e
 		} else {
 			// Get SPS from the SDP
 			// Calculate the width and height of the video
+			var streamWidth, streamHeight int
+			var streamFPS float64
 			var sps h265.SPS
-			err = sps.Unmarshal(formaH265.SPS)
-			if err != nil {
-				log.Log.Info("capture.golibrtsp.Connect(H265): " + err.Error())
-				return
+			if spsErr := sps.Unmarshal(formaH265.SPS); spsErr != nil {
+				log.Log.Info("capture.golibrtsp.Connect(H265): SPS unmarshal failed (will update from in-band NALUs): " + spsErr.Error())
+			} else {
+				streamWidth = sps.Width()
+				streamHeight = sps.Height()
+				streamFPS = sps.FPS()
 			}
 			streamIndex := len(g.Streams)
 			g.Streams = append(g.Streams, packets.Stream{
@@ -453,9 +457,9 @@ func (g *Golibrtsp) Connect(ctx context.Context, ctxOtel context.Context) (err e
 				SPS:           formaH265.SPS,
 				PPS:           formaH265.PPS,
 				VPS:           formaH265.VPS,
-				Width:         sps.Width(),
-				Height:        sps.Height(),
-				FPS:           sps.FPS(),
+				Width:         streamWidth,
+				Height:        streamHeight,
+				FPS:           streamFPS,
 				IsBackChannel: false,
 			})
 
@@ -758,7 +762,7 @@ func (g *Golibrtsp) Start(ctx context.Context, streamType string, queue *packets
 				TimeLegacy:      pts,
 				CompositionTime: pts2,
 				CurrentTime:     time.Now().UnixMilli(),
-				Idx:             g.AudioG711Index,
+				Idx:             g.AudioMPEG4Index,
 				IsVideo:         false,
 				IsAudio:         true,
 				Codec:           "AAC",
@@ -1076,11 +1080,41 @@ func (g *Golibrtsp) Start(ctx context.Context, streamType string, queue *packets
 				for _, nalu := range au {
 					typ := h265.NALUType((nalu[0] >> 1) & 0b111111)
 					switch typ {
-					/*case h265.NALUType_VPS_NUT:
-					continue*/
+					case h265.NALUType_VPS_NUT:
+						g.VideoH265Forma.VPS = nalu
+						g.Streams[g.VideoH265Index].VPS = nalu
+						continue
 					case h265.NALUType_SPS_NUT:
+						var inSPS h265.SPS
+						if errSPS := inSPS.Unmarshal(nalu); errSPS == nil {
+							g.Streams[g.VideoH265Index].Width = inSPS.Width()
+							g.Streams[g.VideoH265Index].Height = inSPS.Height()
+							if streamType == "main" {
+								configuration.Config.Capture.IPCamera.Width = inSPS.Width()
+								configuration.Config.Capture.IPCamera.Height = inSPS.Height()
+							} else if streamType == "sub" {
+								configuration.Config.Capture.IPCamera.SubWidth = inSPS.Width()
+								configuration.Config.Capture.IPCamera.SubHeight = inSPS.Height()
+							}
+							if fps := inSPS.FPS(); fps > 0 {
+								g.Streams[g.VideoH265Index].FPS = fps
+							}
+						}
+						g.VideoH265Forma.SPS = nalu
+						g.Streams[g.VideoH265Index].SPS = nalu
+						if streamType == "main" {
+							configuration.Config.Capture.IPCamera.SPSNALUs = [][]byte{nalu}
+						}
 						continue
 					case h265.NALUType_PPS_NUT:
+						g.VideoH265Forma.PPS = nalu
+						g.Streams[g.VideoH265Index].PPS = nalu
+						if streamType == "main" {
+							configuration.Config.Capture.IPCamera.PPSNALUs = [][]byte{nalu}
+							if len(g.VideoH265Forma.VPS) > 0 {
+								configuration.Config.Capture.IPCamera.VPSNALUs = [][]byte{g.VideoH265Forma.VPS}
+							}
+						}
 						continue
 					case h265.NALUType_AUD_NUT:
 						continue

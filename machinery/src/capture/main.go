@@ -90,7 +90,7 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 		videoCodec := ""
 		audioStreams, _ := rtspClient.GetAudioStreams()
 		videoStreams, _ := rtspClient.GetVideoStreams()
-		if len(audioStreams) > 0 {
+		if config.Capture.Audio != "false" && len(audioStreams) > 0 {
 			audioCodec = audioStreams[0].Name
 			config.Capture.IPCamera.SampleRate = audioStreams[0].SampleRate
 			config.Capture.IPCamera.Channels = audioStreams[0].Channels
@@ -106,6 +106,7 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 			var mp4Video *video.MP4
 			var videoTrack uint32
 			var audioTrack uint32
+			var mulawEncoder *MulawToAACEncoder
 			var name string
 
 			// Do not do anything!
@@ -141,7 +142,11 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 					nextPkt.IsKeyFrame && (startRecording+postRecording-now <= 0 || now-startRecording > maxRecordingPeriod-500) {
 
 					// Write the last packet before closing the recording.
-					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt)
+					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt, mulawEncoder)
+					if mulawEncoder != nil {
+						mulawEncoder.Close()
+						mulawEncoder = nil
+					}
 
 					// Close mp4
 					if len(mp4Video.SPSNALUs) == 0 && len(configuration.Config.Capture.IPCamera.SPSNALUs) > 0 {
@@ -293,15 +298,22 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 					if audioCodec == "AAC" {
 						audioTrack = mp4Video.AddAudioTrack("AAC")
 					} else if audioCodec == "PCM_MULAW" {
-						log.Log.Debug("capture.main.HandleRecordStream(continuous): no AAC audio codec detected, skipping audio track.")
+						enc, encErr := NewMulawToAACEncoder()
+						if encErr == nil {
+							mulawEncoder = enc
+							audioTrack = mp4Video.AddAudioTrack("AAC")
+							configuration.Config.Capture.IPCamera.SampleRate = enc.SampleRate()
+						} else {
+							log.Log.Warning("capture.main.HandleRecordStream(continuous): PCM_MULAW encoder init failed, audio will be skipped: " + encErr.Error())
+						}
 					}
 
-					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt)
+					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt, mulawEncoder)
 					recordingStatus = "started"
 
 				} else if start {
 
-					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt)
+					writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt, mulawEncoder)
 				}
 				pkt = nextPkt
 			}
@@ -309,6 +321,10 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 			// We might have interrupted the recording while restarting the agent.
 			// If this happens we need to check to properly close the recording.
 			if cursorError != nil {
+				if mulawEncoder != nil {
+					mulawEncoder.Close()
+					mulawEncoder = nil
+				}
 				if recordingStatus == "started" {
 
 					log.Log.Info("capture.main.HandleRecordStream(continuous): Recording finished: file save: " + name)
@@ -389,6 +405,7 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 
 			var videoTrack uint32
 			var audioTrack uint32
+			var mulawEncoder *MulawToAACEncoder
 
 			for motion := range communication.HandleMotion {
 
@@ -520,12 +537,19 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 						if audioCodec == "AAC" {
 							audioTrack = mp4Video.AddAudioTrack("AAC")
 						} else if audioCodec == "PCM_MULAW" {
-							log.Log.Debug("capture.main.HandleRecordStream(continuous): no AAC audio codec detected, skipping audio track.")
+							enc, encErr := NewMulawToAACEncoder()
+							if encErr == nil {
+								mulawEncoder = enc
+								audioTrack = mp4Video.AddAudioTrack("AAC")
+								configuration.Config.Capture.IPCamera.SampleRate = enc.SampleRate()
+							} else {
+								log.Log.Warning("capture.main.HandleRecordStream(motiondetection): PCM_MULAW encoder init failed, audio will be skipped: " + encErr.Error())
+							}
 						}
 						start = true
 					}
 					if start {
-						writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt)
+						writeSampleToMP4(mp4Video, videoTrack, audioTrack, pkt, mulawEncoder)
 					}
 
 					pkt = nextPkt
@@ -553,6 +577,10 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 				if (videoCodec == "H264" && (len(mp4Video.SPSNALUs) == 0 || len(mp4Video.PPSNALUs) == 0)) ||
 					(videoCodec == "H265" && (len(mp4Video.VPSNALUs) == 0 || len(mp4Video.SPSNALUs) == 0 || len(mp4Video.PPSNALUs) == 0)) {
 					log.Log.Warning("capture.main.HandleRecordStream(motiondetection): closing MP4 without full parameter sets, moov may be incomplete")
+				}
+				if mulawEncoder != nil {
+					mulawEncoder.Close()
+					mulawEncoder = nil
 				}
 				mp4Video.Close(&config)
 				log.Log.Info("capture.main.HandleRecordStream(motiondetection): file save: " + name)
@@ -806,7 +834,7 @@ func convertPTS(v time.Duration) uint64 {
 // that contain B-frames. Passing the monotonic DTS as the sample timestamp keeps
 // the fragment timeline (tfdt/sidx) monotonic, while the composition offset is
 // forwarded so frames are still presented in PTS order.
-func writeSampleToMP4(mp4Video *video.MP4, videoTrack, audioTrack uint32, pkt packets.Packet) {
+func writeSampleToMP4(mp4Video *video.MP4, videoTrack, audioTrack uint32, pkt packets.Packet, mulawEncoder *MulawToAACEncoder) {
 	if mp4Video == nil {
 		return
 	}
@@ -827,9 +855,15 @@ func writeSampleToMP4(mp4Video *video.MP4, videoTrack, audioTrack uint32, pkt pa
 			if err := mp4Video.AddSampleToTrack(audioTrack, pkt.IsKeyFrame, pkt.Data, pts, 0); err != nil {
 				log.Log.Error("capture.main.writeSampleToMP4(): " + err.Error())
 			}
-		} else if pkt.Codec == "PCM_MULAW" {
-			// TODO: transcode to AAC, some work to do..
-			log.Log.Debug("capture.main.writeSampleToMP4(): no AAC audio codec detected, skipping audio track.")
+		} else if pkt.Codec == "PCM_MULAW" && mulawEncoder != nil {
+			adtsData, err := mulawEncoder.Encode(pkt.Data)
+			if err != nil {
+				log.Log.Error("capture.main.writeSampleToMP4(): PCM_MULAW transcode: " + err.Error())
+			} else if len(adtsData) > 0 {
+				if err := mp4Video.AddSampleToTrack(audioTrack, false, adtsData, pts, 0); err != nil {
+					log.Log.Error("capture.main.writeSampleToMP4(): " + err.Error())
+				}
+			}
 		}
 	}
 }
