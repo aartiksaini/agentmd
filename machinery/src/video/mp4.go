@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -109,7 +110,12 @@ type bufferedSample struct {
 // NewMP4 creates a new MP4 object.
 // maxDurationSec is the maximum expected recording duration in seconds,
 // used to calculate the free-box placeholder size for ftyp+moov+sidx.
-func NewMP4(fileName string, spsNALUs [][]byte, ppsNALUs [][]byte, vpsNALUs [][]byte, maxDurationSec int64) *MP4 {
+func NewMP4(fileName string, spsNALUs [][]byte, ppsNALUs [][]byte, vpsNALUs [][]byte, maxDurationSec int64) (*MP4, error) {
+
+	// Ensure the recording directory exists.
+	if err := os.MkdirAll(filepath.Dir(fileName), 0755); err != nil {
+		return nil, fmt.Errorf("mp4.NewMP4: failed to create recording directory %q: %w", filepath.Dir(fileName), err)
+	}
 
 	// Calculate the placeholder size needed at the start of the file.
 	// Components:
@@ -129,17 +135,19 @@ func NewMP4(fileName string, spsNALUs [][]byte, ppsNALUs [][]byte, vpsNALUs [][]
 	freeBoxSize := int(baseSize + sidxSize)
 	free := mp4ff.NewFreeBox(make([]byte, freeBoxSize))
 
-	// Create a writer
 	ofd, err := os.Create(fileName)
 	if err != nil {
+		return nil, fmt.Errorf("mp4.NewMP4: failed to create file %q: %w", fileName, err)
 	}
 
 	// Create a buffered writer
 	bufferedWriter := bufio.NewWriterSize(ofd, 64*1024) // 64KB buffer
 
 	// Write the free box placeholder at the start of the file
-	err = free.Encode(bufferedWriter)
-	if err != nil {
+	if err = free.Encode(bufferedWriter); err != nil {
+		ofd.Close()
+		os.Remove(fileName)
+		return nil, fmt.Errorf("mp4.NewMP4: failed to write free box placeholder: %w", err)
 	}
 
 	return &MP4{
@@ -151,7 +159,7 @@ func NewMP4(fileName string, spsNALUs [][]byte, ppsNALUs [][]byte, vpsNALUs [][]
 		SPSNALUs:    spsNALUs,
 		PPSNALUs:    ppsNALUs,
 		VPSNALUs:    vpsNALUs,
-	}
+	}, nil
 }
 
 // SetWidth sets the width of the video

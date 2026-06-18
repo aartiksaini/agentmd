@@ -40,7 +40,10 @@ func runLoopSeamScenario(t *testing.T, gopFrames int) {
 
 	sps := []byte{0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x47, 0xfe, 0xc8}
 	pps := []byte{0x68, 0xce, 0x38, 0x80}
-	mp4Video := NewMP4(tmpFile.Name(), [][]byte{sps}, [][]byte{pps}, nil, 60)
+	mp4Video, err := NewMP4(tmpFile.Name(), [][]byte{sps}, [][]byte{pps}, nil, 60)
+	if err != nil {
+		t.Fatalf("NewMP4 failed: %v", err)
+	}
 	mp4Video.SetWidth(1920)
 	mp4Video.SetHeight(1080)
 	v := mp4Video.AddVideoTrack("H264")

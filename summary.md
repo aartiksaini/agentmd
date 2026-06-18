@@ -69,6 +69,28 @@ error: 'AVFrame' has no member named 'channel_layout'; did you mean 'ch_layout'?
 
 ---
 
+## Bug 4 — Silent MP4 File Creation Failure Causing "invalid argument" Write Errors
+
+**Files:** `machinery/src/video/mp4.go`, `machinery/src/capture/main.go`
+
+`NewMP4()` had two silent error swallows — both `os.Create()` and `free.Encode()` failures were handled with empty `if err != nil {}` blocks. When `os.Create()` returned a nil `*os.File` (e.g. recording directory missing or permission denied), all subsequent writes to that nil file (`Segment.Encode`, `FileWriter.Sync`, `FileWriter.WriteAt`) returned `"invalid argument"` from Go's nil `*os.File` receiver check. This caused every recording segment to fail silently, files were never created on disk, and the rename at the end of each recording failed with `"no such file or directory"`.
+
+**Observed symptoms:**
+```
+mp4.AddSampleToTrack(): error encoding segment: invalid argument
+mp4.Close(): error syncing file: invalid argument
+mp4.Close(): error writing init segment: invalid argument
+error renaming file: no such file or directory
+```
+
+**Fix:**
+- Changed `NewMP4()` signature to `(*MP4, error)` — errors are now returned to the caller
+- Added `os.MkdirAll(filepath.Dir(fileName), 0755)` before `os.Create()` to ensure the recording directory exists
+- Added explicit `os.Create()` error return with the actual file path and OS error for easy diagnosis
+- Both call sites in `HandleRecordStream()` (continuous and motion-detection paths) now check the error and skip the recording gracefully instead of proceeding with a nil-backed file
+
+---
+
 ## Feature — Runtime Audio Enable/Disable Flag
 
 **Files:** `machinery/src/models/config.go`, `machinery/src/capture/main.go`
