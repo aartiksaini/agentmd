@@ -139,4 +139,4 @@ echo <PAT> | docker login ghcr.io -u <github-username> --password-stdin
 
 - The `mulaw_to_aac.go` file uses CGo with FFmpeg. The `kerberos/base` build image includes the required headers, so all Docker-based builds work without extra steps.
 - The `go.yml` CI workflow runs inside `kerberos/base:amd64-ddbe40e` to match the same FFmpeg library versions used in the Dockerfile.
-- The `Dockerfile` is for AMD64; `Dockerfile.arm64` is for ARM64. Both use the same multi-stage build pattern: Go compile → Node UI build → Alpine runtime image.
+- The `Dockerfile` is for AMD64; `Dockerfile.arm64` is for ARM64. Both use the same multi-stage build pattern: Go compile → Node UI build → Alpine runtime image...
