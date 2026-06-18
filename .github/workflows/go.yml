@@ -26,8 +26,8 @@ jobs:
           go-version: ${{ matrix.go-version }}
       - name: Check out code into the Go module directory
         uses: actions/checkout@v4
-      - name: Set up git ownershi
-        run: git config --system --add safe.directory /__w/agent/agent
+      - name: Set up git ownership
+        run: git config --system --add safe.directory ${{ github.workspace }}
       - name: Get dependencies
         run: cd machinery && go mod download
       - name: Build
