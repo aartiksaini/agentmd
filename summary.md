@@ -49,6 +49,26 @@ The H265 packet handler in `Start()` contained placeholder `continue` cases for 
 
 ---
 
+## Bug 3 — FFmpeg Channel Layout API Incompatibility (FFmpeg 5.1+)
+
+**File:** `machinery/src/capture/mulaw_to_aac.go`
+
+The `MulawToAACEncoder` C code used the legacy `channels` and `channel_layout` fields on `AVCodecContext` and `AVFrame`, and `swr_alloc_set_opts()` with integer channel layout values. These were removed in FFmpeg 5.1 (libavutil 57+), causing compile errors:
+
+```
+error: 'AVCodecContext' has no member named 'channels'
+error: 'AVCodecContext' has no member named 'channel_layout'; did you mean 'ch_layout'?
+error: 'AVFrame' has no member named 'channel_layout'; did you mean 'ch_layout'?
+```
+
+**Fix:** Migrated to the FFmpeg 5.1+ `AVChannelLayout` API:
+- `av_channel_layout_default(&ch_layout, channels)` to initialize the layout
+- `av_channel_layout_copy(&ctx->ch_layout, &ch_layout)` to assign it to encoder and frame contexts
+- `swr_alloc_set_opts2(&swr_ctx, &ch_layout, ...)` replaces the deprecated `swr_alloc_set_opts()`
+- `av_channel_layout_uninit(&ch_layout)` added on all exit paths to free layout resources
+
+---
+
 ## Feature — Runtime Audio Enable/Disable Flag
 
 **Files:** `machinery/src/models/config.go`, `machinery/src/capture/main.go`

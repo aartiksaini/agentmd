@@ -30,14 +30,17 @@ static mulaw_aac_enc_t* mulaw_aac_enc_create(int sample_rate, int channels) {
     e->enc_ctx = avcodec_alloc_context3(codec);
     if (!e->enc_ctx) { free(e); return NULL; }
 
-    e->enc_ctx->sample_rate    = sample_rate;
-    e->enc_ctx->sample_fmt     = AV_SAMPLE_FMT_FLTP;
-    e->enc_ctx->bit_rate       = 32000;
-    e->enc_ctx->channels       = channels;
-    e->enc_ctx->channel_layout = av_get_default_channel_layout(channels);
+    AVChannelLayout ch_layout;
+    av_channel_layout_default(&ch_layout, channels);
+
+    e->enc_ctx->sample_rate = sample_rate;
+    e->enc_ctx->sample_fmt  = AV_SAMPLE_FMT_FLTP;
+    e->enc_ctx->bit_rate    = 32000;
+    av_channel_layout_copy(&e->enc_ctx->ch_layout, &ch_layout);
 
     if (avcodec_open2(e->enc_ctx, codec, NULL) < 0) {
         avcodec_free_context(&e->enc_ctx);
+        av_channel_layout_uninit(&ch_layout);
         free(e);
         return NULL;
     }
@@ -47,16 +50,17 @@ static mulaw_aac_enc_t* mulaw_aac_enc_create(int sample_rate, int channels) {
     e->frame = av_frame_alloc();
     if (!e->frame) {
         avcodec_free_context(&e->enc_ctx);
+        av_channel_layout_uninit(&ch_layout);
         free(e);
         return NULL;
     }
-    e->frame->nb_samples     = e->frame_size;
-    e->frame->format         = AV_SAMPLE_FMT_FLTP;
-    e->frame->channel_layout = e->enc_ctx->channel_layout;
-    e->frame->channels       = channels;
+    e->frame->nb_samples = e->frame_size;
+    e->frame->format     = AV_SAMPLE_FMT_FLTP;
+    av_channel_layout_copy(&e->frame->ch_layout, &ch_layout);
     if (av_frame_get_buffer(e->frame, 0) < 0) {
         av_frame_free(&e->frame);
         avcodec_free_context(&e->enc_ctx);
+        av_channel_layout_uninit(&ch_layout);
         free(e);
         return NULL;
     }
@@ -65,23 +69,25 @@ static mulaw_aac_enc_t* mulaw_aac_enc_create(int sample_rate, int channels) {
     if (!e->pkt) {
         av_frame_free(&e->frame);
         avcodec_free_context(&e->enc_ctx);
+        av_channel_layout_uninit(&ch_layout);
         free(e);
         return NULL;
     }
 
-    e->swr_ctx = swr_alloc_set_opts(NULL,
-        e->enc_ctx->channel_layout, AV_SAMPLE_FMT_FLTP, sample_rate,
-        av_get_default_channel_layout(channels), AV_SAMPLE_FMT_S16, sample_rate,
-        0, NULL);
-    if (!e->swr_ctx || swr_init(e->swr_ctx) < 0) {
+    if (swr_alloc_set_opts2(&e->swr_ctx,
+            &ch_layout, AV_SAMPLE_FMT_FLTP, sample_rate,
+            &ch_layout, AV_SAMPLE_FMT_S16,  sample_rate,
+            0, NULL) < 0 || swr_init(e->swr_ctx) < 0) {
         if (e->swr_ctx) swr_free(&e->swr_ctx);
         av_packet_free(&e->pkt);
         av_frame_free(&e->frame);
         avcodec_free_context(&e->enc_ctx);
+        av_channel_layout_uninit(&ch_layout);
         free(e);
         return NULL;
     }
 
+    av_channel_layout_uninit(&ch_layout);
     return e;
 }
 
