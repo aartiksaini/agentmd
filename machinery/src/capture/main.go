@@ -286,7 +286,14 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 						log.Log.Warning("capture.main.HandleRecordStream(continuous): missing SPS/PPS at recording start")
 					}
 					// Create a video file, and set the dimensions.
-					mp4Video = video.NewMP4(fullName, spsNALUS, ppsNALUS, vpsNALUS, configuration.Config.Capture.MaxLengthRecording)
+					var mp4Err error
+					mp4Video, mp4Err = video.NewMP4(fullName, spsNALUS, ppsNALUS, vpsNALUS, configuration.Config.Capture.MaxLengthRecording)
+					if mp4Err != nil {
+						log.Log.Error("capture.main.HandleRecordStream(continuous): failed to create MP4: " + mp4Err.Error())
+						start = false
+						pkt = nextPkt
+						continue
+					}
 					mp4Video.SetWidth(width)
 					mp4Video.SetHeight(height)
 
@@ -525,7 +532,12 @@ func HandleRecordStream(queue *packets.Queue, configDirectory string, configurat
 						startRecording = pkt.CurrentTime
 
 						// Create a video file, and set the dimensions.
-						mp4Video = video.NewMP4(fullName, spsNALUS, ppsNALUS, vpsNALUS, configuration.Config.Capture.MaxLengthRecording)
+						var mp4Err error
+						mp4Video, mp4Err = video.NewMP4(fullName, spsNALUS, ppsNALUS, vpsNALUS, configuration.Config.Capture.MaxLengthRecording)
+						if mp4Err != nil {
+							log.Log.Error("capture.main.HandleRecordStream(motiondetection): failed to create MP4: " + mp4Err.Error())
+							break
+						}
 						mp4Video.SetWidth(width)
 						mp4Video.SetHeight(height)
 
